@@ -1,22 +1,59 @@
-import { Ref, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { BinderNode, CHANGED } from 'Frontend/form/src/BinderNode.js';
+import { Ref, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { AbstractModel, ModelConstructor, ModelValue, _fromString, hasFromString } from "./src/Models.js";
 import { BinderRoot, BinderRootConfiguration } from "./src/BinderRoot.js";
 import { useBinderNode } from "./binderNode.js";
 import { AbstractFieldStrategy, FieldElement, getDefaultFieldStrategy } from "./src/Field.js";
+import { getBinderNode } from './src/BinderNodeHelpers.js';
 
 export function createBinder<T, M extends AbstractModel<T>>(Model: ModelConstructor<T, M>, config?: BinderRootConfiguration<T>) {
   const emptyValue = Model.createEmptyValue();
   return new BinderRoot(Model, config);
 }
 
+function useUpdate() {
+  const [_, update] = useReducer((x) => !x, true);
+  return update;
+}
+
 export function useBinder<T, M extends AbstractModel<T>>(Model: ModelConstructor<T, M>, config?: BinderRootConfiguration<T>) {
   const binder = useMemo(() => createBinder(Model, config), []);
-  // binder.delegateTo(useState);
+  const update = useUpdate();
+
+  useEffect(() => {
+    binder.addEventListener(CHANGED, update)
+  }, []);
+
   return {
-    ...useBinderNode<T, M>(binder.model),
-    submit: () => binder.submit(),
-    reset: () => binder.reset(),
-    clear: () => binder.clear()
+    binder,
+    field<T, M extends AbstractModel<T>>(model: M) {
+      const node = getBinderNode(model) as BinderNode<T, M>;
+      let field: HTMLElement | null;
+      const updateValueEvent = (e: any) => {
+        if (field) {
+          const elementValue = getDefaultFieldStrategy(field, model).value;
+          node.value = typeof elementValue === "string" && hasFromString(model)
+            ? model[_fromString](elementValue)
+            : elementValue;
+        }
+      }
+
+      return {
+        name: node.name,
+        ref(element: HTMLElement | null) {
+          field = element;
+        },
+        // value: contextNode.value,
+        // invalid: contextNode.invalid,
+        // errorMessage: contextNode.ownErrors[0]?.message || "",
+        onBlur: (e: any) => {
+          updateValueEvent(e);
+          node.visited = true;
+        },
+        onChange: updateValueEvent,
+        onInput: updateValueEvent
+      }
+    },
   };
 }
 

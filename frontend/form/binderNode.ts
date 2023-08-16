@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { BinderNode } from "./src/BinderNode";
+import { useEffect, useReducer } from "react";
+import { BinderNode, CHANGED } from './src/BinderNode';
 import { getBinderNode } from "./src/BinderNodeHelpers";
 import { AbstractModel } from "./src/Models";
 import { Dispatch } from "./src/StoreAdapter";
@@ -30,7 +30,12 @@ export type ContextRoot<T, M extends AbstractModel<T>> = ContextNode<T, M> & Rea
 
 export function useBinderNode<T, M extends AbstractModel<T>>(model: M): ContextNode<T, M> {
   const binderNode = getBinderNode(model) as BinderNode<T, M>;
-  binderNode.delegateTo(useState);
+
+  const [_, forceUpdate] = useReducer((x) => !x, true);
+  useEffect(() => {
+    binderNode.addEventListener(CHANGED, forceUpdate)
+  }, []);
+
   return {
     model,
     name: binderNode.name,

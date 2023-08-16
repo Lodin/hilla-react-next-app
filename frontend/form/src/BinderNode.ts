@@ -29,7 +29,6 @@ import {
   type ModelValue,
   ObjectModel,
 } from './Models.js';
-import { StoreAdapter, StoreFactory } from './StoreAdapter.js';
 import type { Validator, ValueError } from './Validation.js';
 import { ValidityStateValidator } from './Validators.js';
 import { _validity } from './Validity.js';
@@ -38,9 +37,10 @@ function getErrorPropertyName(valueError: ValueError<any>): string {
   return typeof valueError.property === 'string' ? valueError.property : getBinderNode(valueError.property).name;
 }
 
-const _visited = Symbol('_visited');
-const _validators = Symbol('_validators');
-const _ownErros = Symbol('_ownErros');
+
+export const CHANGED = 'binder-node-changed';
+
+const notification = new Event(CHANGED);
 
 /**
  * The BinderNode<T, M> class provides the form binding related APIs
@@ -50,16 +50,14 @@ const _ownErros = Symbol('_ownErros');
  * and array models have child nodes of field and array item model
  * instances.
  */
-export class BinderNode<T, M extends AbstractModel<T>> {
+export class BinderNode<T, M extends AbstractModel<T>> extends EventTarget {
   public readonly model: M;
 
-  private [_visited] = new StoreAdapter<boolean>(false);
+  #visited = false;
+  #validators: ReadonlyArray<Validator<T>> = [];
+  #ownErrors: ReadonlyArray<ValueError<T>> = [];
 
-  private [_validators] = new StoreAdapter<ReadonlyArray<Validator<T>>>([]);
-
-  private [_ownErros] = new StoreAdapter<ReadonlyArray<ValueError<T>>>([]);
-
-  private defaultArrayItemValue?: T;
+  #defaultArrayItemValue?: T;
 
   /**
    * The validity state read from the bound element, if any. Represents the
@@ -73,23 +71,12 @@ export class BinderNode<T, M extends AbstractModel<T>> {
   private readonly validityStateValidator: ValidityStateValidator<T>;
 
   public constructor(model: M) {
+    super();
     this.model = model;
     model[_binderNode] = this;
     this.validityStateValidator = new ValidityStateValidator<T>();
     this.initializeValue();
-    this[_validators].value = model[_initialValidators];
-  }
-
-  public delegateTo(useState: StoreFactory) {
-    this[_visited].delegateTo(useState);
-    this[_validators].delegateTo(useState);
-    this[_ownErros].delegateTo(useState);
-  }
-
-  public undelegate() {
-    this[_visited].undelegate();
-    this[_validators].undelegate();
-    this[_ownErros].undelegate();
+    this.#validators = model[_initialValidators];
   }
 
   /**
@@ -150,11 +137,11 @@ export class BinderNode<T, M extends AbstractModel<T>> {
   public get defaultValue(): T {
     const parent = this.parent || this.binder;
     if (this.parent && this.parent.model instanceof ArrayModel) {
-      if (!this.parent.defaultArrayItemValue) {
-        this.parent.defaultArrayItemValue = this.parent.model[_ItemModel].createEmptyValue();
+      if (!this.parent.#defaultArrayItemValue) {
+        this.parent.#defaultArrayItemValue = this.parent.model[_ItemModel].createEmptyValue();
       }
 
-      return this.parent.defaultArrayItemValue;
+      return this.parent.#defaultArrayItemValue;
     }
 
     return (this.parent || this.binder).defaultValue[this.model[_key]];
@@ -172,11 +159,12 @@ export class BinderNode<T, M extends AbstractModel<T>> {
    * model.
    */
   public get validators(): ReadonlyArray<Validator<T>> {
-    return this[_validators].value;
+    return this.#validators;
   }
 
   public set validators(validators: ReadonlyArray<Validator<T>>) {
-    this[_validators].value = validators;
+    this.#validators = validators;
+    this.#notify();
   }
 
   /**
@@ -217,20 +205,22 @@ export class BinderNode<T, M extends AbstractModel<T>> {
    * @param validator a validator
    */
   public addValidator(validator: Validator<T>) {
-    this[_validators].value = [...this.validators, validator];
+    this.#validators = [...this.validators, validator];
+    this.#notify();
   }
 
   /**
    * True if the bound field was ever focused and blurred by the user.
    */
   public get visited() {
-    return this[_visited].value;
+    return this.#visited;
   }
 
   public set visited(v) {
-    if (this[_visited].value !== v) {
-      this[_visited].value = v;
+    if (this.#visited !== v) {
+      this.#visited = v;
       this.updateValidation();
+      this.#notify();
     }
   }
 
@@ -250,7 +240,7 @@ export class BinderNode<T, M extends AbstractModel<T>> {
    * The array of validation errors directly related with the model.
    */
   public get ownErrors() {
-    return this[_ownErros].value;
+    return this.#ownErrors;
   }
 
   /**
@@ -324,12 +314,15 @@ export class BinderNode<T, M extends AbstractModel<T>> {
     }
     let needsUpdate = false;
     if (this.ownErrors.length) {
-      this[_ownErros].value = [];
+      this.#ownErrors = [];
       needsUpdate = true;
     }
     if ([...this.getChildBinderNodes()].filter((childBinderNode) => childBinderNode.clearValidation()).length > 0) {
       needsUpdate = true;
     }
+
+    this.#notify();
+
     return needsUpdate;
   }
 
@@ -355,10 +348,11 @@ export class BinderNode<T, M extends AbstractModel<T>> {
     const { name } = this;
     const ownErrors = errors.filter((valueError) => getErrorPropertyName(valueError) === name);
     const relatedErrors = errors.filter((valueError) => getErrorPropertyName(valueError).startsWith(name));
-    this[_ownErros].value = ownErrors;
+    this.#ownErrors = ownErrors;
     for (const childBinderNode of this.getChildBinderNodes()) {
       childBinderNode.setErrorsWithDescendants(relatedErrors);
     }
+    this.#notify();
   }
 
   private *getChildBinderNodes(): Generator<BinderNode<unknown, AbstractModel<unknown>>> {
@@ -469,5 +463,9 @@ export class BinderNode<T, M extends AbstractModel<T>> {
       }
       binder.value = value!;
     }
+  }
+
+  #notify() {
+    this.dispatchEvent(notification);
   }
 }

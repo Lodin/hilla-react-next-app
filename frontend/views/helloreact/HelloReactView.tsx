@@ -13,20 +13,16 @@ const comboBoxItems = ['foo', 'bar'];
 export default function FormView() {
   const [ name, setName ] = useState('');
 
-  const { model, submit, } = useBinder(EntityModel, {onSubmit: FormEndpoint.sendEntity});
-  const nameField = useField(model.name);
-  const choiceField = useField(model.choice);
-  const numberField = useField(model.number);
-  const dateField = useField(model.date);
+  const { binder, field } = useBinder(EntityModel, {onSubmit: FormEndpoint.sendEntity});
 
   return (
     <>
       <section className="flex p-m gap-m items-baseline">
-        <TextField label="Name" {...nameField}></TextField>
-        <ComboBox label="Choose" {...choiceField} items={comboBoxItems}></ComboBox>
-        <NumberField label="Number" {...numberField}></NumberField>
-        <DatePicker label="Date" {...dateField}></DatePicker>
-        <Button onClick={submit}>submit</Button>
+        <TextField label="Name" {...field(binder.model.name)}></TextField>
+        <ComboBox label="Choose" {...field(binder.model.choice)} items={comboBoxItems}></ComboBox>
+        <NumberField label="Number" {...field(binder.model.number)}></NumberField>
+        <DatePicker label="Date" {...field(binder.model.date)}></DatePicker>
+        <Button onClick={() => binder.submit()}>submit</Button>
       </section>
     </>
   );
